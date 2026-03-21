@@ -1,0 +1,26 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Preparation') {
+            steps {
+                // Pull code from GitHub (replace with your repo)
+                git 'https://github.com/nithya0312-n/test_jenkins.git'
+            }
+        }
+
+        stage('Run Script') {
+            steps {
+                // Run the Python file
+                sh 'python3 file.py'
+            }
+        }
+
+        stage('Results') {
+            steps {
+                // Archive the log file created by the Python script
+                archiveArtifacts artifacts: 'pipeline_output.log', allowEmptyArchive: true
+            }
+        }
+    }
+}
