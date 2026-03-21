@@ -5,8 +5,8 @@ pipeline {
         stage('Preparation') {
             steps {
                 // Pull code from GitHub (replace with your repo)
-                git 'https://github.com/nithya0312-n/test_jenkins.git'
-            }
+                  git branch: 'main', url: 'git@github.com:nithya0312-n/test_jenkins.git' 
+           }
         }
 
         stage('Run Script') {
