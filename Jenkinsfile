@@ -1,18 +1,18 @@
-pipeline {
+ipipeline {
     agent any
 
     stages {
         stage('Preparation') {
             steps {
                 // Pull code from GitHub (replace with your repo)
-                git 'https://github.com/your-username/your-python-repo.git'
+                git 'https://github.com/nithya0312-n/test_jenkins.git'
             }
         }
 
         stage('Run Script') {
             steps {
                 // Run the Python file
-                sh 'python3 your_script.py'
+                sh 'python3 file.py'
             }
         }
 
@@ -24,4 +24,3 @@ pipeline {
         }
     }
 }
-
