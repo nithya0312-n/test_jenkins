@@ -1,142 +1,195 @@
+
 pipeline {
-    agent any
+    agent any
 
-    environment {
-        IMAGE_NAME     = "nithyan12/python-jenkins-app"
-        IMAGE_TAG      = "build-${BUILD_NUMBER}"
-        CONTAINER_NAME = "python-app"
-        KEEP_IMAGES    = 3
-    }
+ 
 
-    stages {
+    environment {
+        IMAGE_NAME = "nithyan12/python-jenkins-app"
+        IMAGE_TAG  = "build-${BUILD_NUMBER}"
+    }
 
-        stage('Checkout Code') {
-            steps {
-                checkout scm
-                sh 'ls -l'
-            }
-        }
+ 
 
-        stage('Build Docker Image') {
-            steps {
-                sh '''
-                echo "Building Docker image..."
-                docker build -t $IMAGE_NAME:$IMAGE_TAG .
-                docker tag $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
-                '''
-            }
-        }
+    stages {
 
-        stage('Login to Docker Hub') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-cred',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh '''
-                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                    '''
-                }
-            }
-        }
+ 
 
-        stage('Push Image to Docker Hub') {
-            steps {
-                sh '''
-                echo "Pushing images..."
-                docker push $IMAGE_NAME:$IMAGE_TAG
-                docker push $IMAGE_NAME:latest
-                '''
-            }
-        }
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/nithya0312-n/test_jenkins.git'
+            }
+        }
 
-        stage('Run Container') {
-            steps {
-                sh '''
-                echo "Running container..."
-                docker stop $CONTAINER_NAME || true
-                docker rm   $CONTAINER_NAME || true
+ 
 
-                docker run -d \
-                  --name $CONTAINER_NAME \
-                  --restart unless-stopped \
-                  $IMAGE_NAME:$IMAGE_TAG
-                '''
-            }
-        }
+        stage('Build Image') {
+            steps {
+                sh '''
+                docker build -t $IMAGE_NAME:$IMAGE_TAG .
+                '''
+            }
+        }
 
-        stage('Cleanup Local Docker Images (Keep Latest 3)') {
-            steps {
-                sh '''
-                echo "Cleaning local Docker images (keep latest 3)..."
+ 
 
-                docker images $IMAGE_NAME --format "{{.Tag}}" \
-                  | grep '^build-' \
-                  | sort -t- -k2 -nr \
-                  | tail -n +$((KEEP_IMAGES + 1)) \
-                  | xargs -r -I {} docker rmi -f $IMAGE_NAME:{} || true
+        stage('Docker Login') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-cred',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh '''
+                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                    '''
+                }
+            }
+        }
 
-                docker images -f dangling=true -q \
-                  | xargs -r docker rmi -f || true
-                '''
-            }
-        }
+ 
 
-        /* ✅ THIS IS EXACTLY WHERE YOUR STAGE GOES ✅ */
-        stage('Cleanup Docker Hub Tags (Keep Latest 3)') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-cred',
-                    usernameVariable: 'HUB_USER',
-                    passwordVariable: 'HUB_PASS'
-                )]) {
-                    sh '''
-                    echo "Authenticating to Docker Hub API..."
+        stage('Push Image') {
+            steps {
+                sh '''
+                docker push $IMAGE_NAME:$IMAGE_TAG
+                '''
+            }
+        }
 
-                    TOKEN=$(curl -s -X POST https://hub.docker.com/v2/users/login/ \
-                      -H "Content-Type: application/json" \
-                      -d "{\\"username\\": \\"$HUB_USER\\", \\"password\\": \\"$HUB_PASS\\"}" \
-                      | jq -r '.token')
+ 
 
-                    if [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ]; then
-                      echo "❌ Failed to get Docker Hub token"
-                      exit 1
-                    fi
+        /* ✅ LOCAL DOCKER CLEANUP */
+        stage('Cleanup Local Docker Images (Keep Last 3)') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                sh '''
+                echo "Cleaning local Docker images..."
 
-                    echo "✅ Token received"
+ 
 
-                    echo "Fetching Docker Hub tags..."
-                    TAGS=$(curl -s -H "Authorization: JWT $TOKEN" \
-                      https://hub.docker.com/v2/repositories/nithyan12/python-jenkins-app/tags/?page_size=100 \
-                      | jq -r '.results[].name' \
-                      | grep '^build-' \
-                      | sort -t- -k2 -nr)
+                TAGS=$(docker images $IMAGE_NAME --format "{{.Tag}}" \
+                    | grep -E '^[0-9]+$' | sort -n)
 
-                    COUNT=0
-                    for TAG in $TAGS; do
-                      COUNT=$((COUNT+1))
-                      if [ $COUNT -le 3 ]; then
-                        echo "Keeping tag: $TAG"
-                      else
-                        echo "Deleting tag from Docker Hub: $TAG"
-                        curl -s -X DELETE \
-                          -H "Authorization: JWT $TOKEN" \
-                          https://hub.docker.com/v2/repositories/nithyan12/python-jenkins-app/tags/$TAG/
-                      fi
-                    done
-                    '''
-                }
-            }
-        }
-    }
+ 
 
-    post {
-        success {
-            echo "✅ CI/CD pipeline completed successfully"
-        }
-        failure {
-            echo "❌ CI/CD pipeline failed"
-        }
-    }
+                COUNT=$(echo "$TAGS" | wc -l)
+
+ 
+
+                if [ "$COUNT" -le 3 ]; then
+                    echo "Nothing to clean locally"
+                    exit 0
+                fi
+
+ 
+
+                REMOVE_COUNT=$((COUNT - 3))
+                REMOVE_TAGS=$(echo "$TAGS" | head -n $REMOVE_COUNT)
+
+ 
+
+                for TAG in $REMOVE_TAGS; do
+                    echo "Removing local image $IMAGE_NAME:$TAG"
+                    docker rmi -f $IMAGE_NAME:$TAG || true
+                done
+                '''
+            }
+        }
+
+ 
+
+        /* ✅ DOCKER HUB REGISTRY CLEANUP */
+        stage('Cleanup Docker Hub Tags (Keep Last 3)') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-cred',
+                    usernameVariable: 'DOCKERHUB_USER',
+                    passwordVariable: 'DOCKERHUB_TOKEN'
+                )]) {
+                    sh '''#!/bin/bash
+                    set +e
+
+ 
+
+                    REPO="python-flask-app"
+                    KEEP=3
+
+ 
+
+                    echo "Authenticating with Docker Hub API..."
+
+ 
+
+                    JWT=$(curl -s -X POST https://hub.docker.com/v2/users/login/ \
+                        -H "Content-Type: application/json" \
+                        -d '{"username":"'"$DOCKERHUB_USER"'","password":"'"$DOCKERHUB_TOKEN"'"}' \
+                        | jq -r .token)
+
+ 
+
+                    if [ -z "$JWT" ] || [ "$JWT" = "null" ]; then
+                        echo "⚠️ Docker Hub authentication failed. Skipping registry cleanup."
+                        exit 0
+                    fi
+
+ 
+
+                    echo "Fetching tags from Docker Hub..."
+
+ 
+
+                    TAGS=$(curl -s -H "Authorization: JWT $JWT" \
+                        "https://hub.docker.com/v2/repositories/$DOCKERHUB_USER/$REPO/tags/?page_size=100" \
+                        | jq -r '.results[].name' \
+                        | grep -E '^[0-9]+$' | sort -n)
+
+ 
+
+                    TOTAL=$(echo "$TAGS" | wc -l)
+
+ 
+
+                    if [ "$TOTAL" -le "$KEEP" ]; then
+                        echo "Nothing to delete from Docker Hub"
+                        exit 0
+                    fi
+
+ 
+
+                    DELETE_COUNT=$((TOTAL - KEEP))
+                    DELETE_TAGS=$(echo "$TAGS" | head -n $DELETE_COUNT)
+
+ 
+
+                    for TAG in $DELETE_TAGS; do
+                        echo "Deleting Docker Hub tag: $TAG"
+                        curl -s -X DELETE \
+                          -H "Authorization: JWT $JWT" \
+                          "https://hub.docker.com/v2/repositories/$DOCKERHUB_USER/$REPO/tags/$TAG/"
+                    done
+
+ 
+
+                    echo "Docker Hub cleanup completed"
+                    '''
+                }
+            }
+        }
+    }
+
+ 
+
+    post {
+        failure {
+            echo "Pipeline failed — deployment completed, cleanup skipped if necessary"
+        }
+    }
 }
+
