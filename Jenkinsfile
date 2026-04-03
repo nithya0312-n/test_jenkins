@@ -4,6 +4,7 @@ pipeline {
     environment {
         IMAGE_NAME = "nithyan12/python-jenkins-app"
         IMAGE_TAG  = "build-${BUILD_NUMBER}"
+        CONTAINER_NAME = "python-app"
     }
 
     stages {
@@ -38,6 +39,31 @@ pipeline {
                 docker push $IMAGE_NAME:latest
                 '''
             }
+        }
+
+        stage('Run Container from Image') {
+            steps {
+                sh '''
+                echo "Stopping old container if it exists..."
+                docker stop $CONTAINER_NAME || true
+                docker rm   $CONTAINER_NAME || true
+
+                echo "Running new container..."
+                docker run -d \
+                  --name $CONTAINER_NAME \
+                  --restart unless-stopped \
+                  $IMAGE_NAME:$IMAGE_TAG
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Image built, pushed, and container is running"
+        }
+        failure {
+            echo "❌ Pipeline failed"
         }
     }
 }
