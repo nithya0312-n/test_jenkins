@@ -2,12 +2,19 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "nithyan12/python-jenkins-app"
-        IMAGE_TAG  = "build-${BUILD_NUMBER}"
+        IMAGE_NAME     = "nithyan12/python-jenkins-app"
+        IMAGE_TAG      = "build-${BUILD_NUMBER}"
         CONTAINER_NAME = "python-app"
     }
 
     stages {
+
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+                sh 'ls -l'
+            }
+        }
 
         stage('Build Docker Image') {
             steps {
@@ -41,14 +48,12 @@ pipeline {
             }
         }
 
-        stage('Run Container from Image') {
+        stage('Run Container') {
             steps {
                 sh '''
-                echo "Stopping old container if it exists..."
                 docker stop $CONTAINER_NAME || true
                 docker rm   $CONTAINER_NAME || true
 
-                echo "Running new container..."
                 docker run -d \
                   --name $CONTAINER_NAME \
                   --restart unless-stopped \
@@ -60,10 +65,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ Image built, pushed, and container is running"
+            echo "✅ CI/CD Pipeline completed successfully"
         }
         failure {
-            echo "❌ Pipeline failed"
+            echo "❌ CI/CD Pipeline failed"
         }
     }
 }
