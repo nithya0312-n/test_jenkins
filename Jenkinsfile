@@ -13,14 +13,16 @@ pipeline {
         stage('Checkout Code') {
             steps {
                 checkout scm
+                sh 'ls -l'
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 sh '''
+                echo "Building new Docker image..."
                 docker build -t $IMAGE_NAME:$IMAGE_TAG .
-                docker tag  $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
+                docker tag $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
                 '''
             }
         }
@@ -42,6 +44,7 @@ pipeline {
         stage('Push Image to Docker Hub') {
             steps {
                 sh '''
+                echo "Pushing images to Docker Hub..."
                 docker push $IMAGE_NAME:$IMAGE_TAG
                 docker push $IMAGE_NAME:latest
                 '''
@@ -51,9 +54,11 @@ pipeline {
         stage('Run Container') {
             steps {
                 sh '''
+                echo "Stopping old container if it exists..."
                 docker stop $CONTAINER_NAME || true
                 docker rm   $CONTAINER_NAME || true
 
+                echo "Running new container..."
                 docker run -d \
                   --name $CONTAINER_NAME \
                   --restart unless-stopped \
@@ -65,23 +70,24 @@ pipeline {
         stage('Cleanup Old Docker Images (Keep Latest 3)') {
             steps {
                 sh '''
-                echo "Cleaning up old Docker images (keeping latest ${KEEP_IMAGES})"
+                echo "🧹 Cleaning up Docker images for $IMAGE_NAME"
 
-                IMAGES=$(docker images $IMAGE_NAME --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \
-                         | grep build- \
-                         | sort -rk2 \
-                         | awk '{print $1}')
+                # 1️⃣ Remove old build-* images, keep latest 3 by build number
+                docker images $IMAGE_NAME --format "{{.Tag}}" \
+                  | grep '^build-' \
+                  | sort -t- -k2 -nr \
+                  | tail -n +$((KEEP_IMAGES + 1)) \
+                  | xargs -r -I {} docker rmi -f $IMAGE_NAME:{} || true
 
-                COUNT=0
-                for IMAGE in $IMAGES; do
-                    COUNT=$((COUNT+1))
-                    if [ $COUNT -le $KEEP_IMAGES ]; then
-                        echo "Keeping $IMAGE"
-                    else
-                        echo "Removing $IMAGE"
-                        docker rmi -f $IMAGE || true
-                    fi
-                done
+                # 2️⃣ Remove dangling <none> images
+                docker images -f "dangling=true" -q \
+                  | xargs -r docker rmi -f || true
+
+                # 3️⃣ Remove old images with incorrect repository name
+                docker images python-jenkins-app -q \
+                  | xargs -r docker rmi -f || true
+
+                echo "✅ Docker image cleanup completed"
                 '''
             }
         }
@@ -89,10 +95,10 @@ pipeline {
 
     post {
         success {
-            echo "✅ Pipeline completed successfully (old images cleaned)"
+            echo "✅ CI/CD pipeline completed successfully"
         }
         failure {
-            echo "❌ Pipeline failed"
+            echo "❌ CI/CD pipeline failed"
         }
     }
 }
