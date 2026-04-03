@@ -2,26 +2,36 @@ pipeline {
     agent any
 
     stages {
-        stage('Preparation') {
-            steps {
-                // Pull code from GitHub (replace with your repo)
-		  withEnv(['GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=no']){
-                  git branch: 'main', url: 'git@github.com:nithya0312-n/test_jenkins.git' 
-           }}
-        }
 
-        stage('Run Script') {
+        stage('Checkout') {
             steps {
-                // Run the Python file
-                sh 'python3 file.py'
+                echo "Source code checked out automatically by Jenkins"
+                sh 'ls -l'
             }
         }
 
-        stage('Results') {
+        stage('Run Python Script') {
             steps {
-                // Archive the log file created by the Python script
-                archiveArtifacts artifacts: 'pipeline_output.log', allowEmptyArchive: true
+                sh '''
+                python3 --version
+                python3 file.py
+                '''
             }
+        }
+
+        stage('Archive Results') {
+            steps {
+                archiveArtifacts artifacts: 'pipeline_output.log', fingerprint: true
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Pipeline completed successfully"
+        }
+        failure {
+            echo "❌ Pipeline failed"
         }
     }
 }
