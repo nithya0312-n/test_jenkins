@@ -55,7 +55,10 @@ pipeline {
                 sh '''
                 docker stop $CONTAINER_NAME || true
                 docker rm   $CONTAINER_NAME || true
-                docker run -d --name $CONTAINER_NAME --restart unless-stopped $IMAGE_NAME:$IMAGE_TAG
+                docker run -d \
+                  --name $CONTAINER_NAME \
+                  --restart unless-stopped \
+                  $IMAGE_NAME:$IMAGE_TAG
                 '''
             }
         }
@@ -70,7 +73,6 @@ pipeline {
                   | tail -n +$((KEEP_IMAGES + 1)) \
                   | xargs -r -I {} docker rmi -f $IMAGE_NAME:{} || true
 
-                # remove dangling layers
                 docker images -f dangling=true -q | xargs -r docker rmi -f || true
                 '''
             }
@@ -85,17 +87,19 @@ pipeline {
                 )]) {
                     sh '''
                     echo "Authenticating to Docker Hub API..."
+
                     TOKEN=$(curl -s -X POST https://hub.docker.com/v2/users/login/ \
                       -H "Content-Type: application/json" \
-                      -d "{\"username\":\"$HUB_USER\",\"password\":\"$HUB_TOKEN\"}" \
+                      -d "{\\"username\\":\\"$HUB_USER\\",\\"password\\":\\"$HUB_TOKEN\\"}" \
                       | jq -r '.token')
 
                     if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-                        echo "Failed to get Docker Hub token"
+                        echo "❌ Failed to get Docker Hub token"
                         exit 1
                     fi
 
-                    echo "Fetching Docker Hub tags..."
+                    echo "✅ Token received"
+
                     TAGS=$(curl -s -H "Authorization: JWT $TOKEN" \
                       https://hub.docker.com/v2/repositories/$DOCKERHUB_USER/$DOCKERHUB_REPO/tags/?page_size=100 \
                       | jq -r '.results[].name' \
@@ -106,7 +110,7 @@ pipeline {
                     for TAG in $TAGS; do
                         COUNT=$((COUNT+1))
                         if [ $COUNT -le $KEEP_IMAGES ]; then
-                            echo "Keeping $TAG"
+                            echo "Keeping Docker Hub tag: $TAG"
                         else
                             echo "Deleting Docker Hub tag: $TAG"
                             curl -s -X DELETE \
