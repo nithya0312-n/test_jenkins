@@ -12,17 +12,17 @@ pipeline {
 
     stages {
 
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
                 checkout scm
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build Image') {
             steps {
                 sh '''
                 docker build -t $IMAGE_NAME:$IMAGE_TAG .
-                docker tag $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
+                docker tag  $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
                 '''
             }
         }
@@ -31,11 +31,11 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-cred',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
+                    usernameVariable: 'DH_USER',
+                    passwordVariable: 'DH_TOKEN'
                 )]) {
                     sh '''
-                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                    echo "$DH_TOKEN" | docker login -u "$DH_USER" --password-stdin
                     '''
                 }
             }
@@ -55,50 +55,47 @@ pipeline {
                 sh '''
                 docker stop $CONTAINER_NAME || true
                 docker rm   $CONTAINER_NAME || true
-
-                docker run -d \
-                  --name $CONTAINER_NAME \
-                  --restart unless-stopped \
-                  $IMAGE_NAME:$IMAGE_TAG
+                docker run -d --name $CONTAINER_NAME --restart unless-stopped $IMAGE_NAME:$IMAGE_TAG
                 '''
             }
         }
 
-        stage('Cleanup Local Images (Keep Latest 3)') {
+        stage('Cleanup LOCAL Images (Keep Latest 3)') {
             steps {
                 sh '''
+                echo "Cleaning local Docker images..."
                 docker images $IMAGE_NAME --format "{{.Tag}}" \
                   | grep '^build-' \
                   | sort -t- -k2 -nr \
-                  | tail -n +4 \
+                  | tail -n +$((KEEP_IMAGES + 1)) \
                   | xargs -r -I {} docker rmi -f $IMAGE_NAME:{} || true
 
-                docker images -f dangling=true -q \
-                  | xargs -r docker rmi -f || true
+                # remove dangling layers
+                docker images -f dangling=true -q | xargs -r docker rmi -f || true
                 '''
             }
         }
 
-        stage('Cleanup Docker Hub Tags (Keep Latest 3)') {
+        stage('Cleanup DOCKER HUB Tags (Keep Latest 3)') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-cred',
                     usernameVariable: 'HUB_USER',
-                    passwordVariable: 'HUB_PASS'
+                    passwordVariable: 'HUB_TOKEN'
                 )]) {
                     sh '''
                     echo "Authenticating to Docker Hub API..."
-
                     TOKEN=$(curl -s -X POST https://hub.docker.com/v2/users/login/ \
                       -H "Content-Type: application/json" \
-                      -d "{\"username\":\"$HUB_USER\",\"password\":\"$HUB_PASS\"}" \
+                      -d "{\"username\":\"$HUB_USER\",\"password\":\"$HUB_TOKEN\"}" \
                       | jq -r '.token')
 
-                    if [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ]; then
+                    if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
                         echo "Failed to get Docker Hub token"
                         exit 1
                     fi
 
+                    echo "Fetching Docker Hub tags..."
                     TAGS=$(curl -s -H "Authorization: JWT $TOKEN" \
                       https://hub.docker.com/v2/repositories/$DOCKERHUB_USER/$DOCKERHUB_REPO/tags/?page_size=100 \
                       | jq -r '.results[].name' \
@@ -109,9 +106,9 @@ pipeline {
                     for TAG in $TAGS; do
                         COUNT=$((COUNT+1))
                         if [ $COUNT -le $KEEP_IMAGES ]; then
-                            echo "Keeping tag $TAG"
+                            echo "Keeping $TAG"
                         else
-                            echo "Deleting tag $TAG from Docker Hub"
+                            echo "Deleting Docker Hub tag: $TAG"
                             curl -s -X DELETE \
                               -H "Authorization: JWT $TOKEN" \
                               https://hub.docker.com/v2/repositories/$DOCKERHUB_USER/$DOCKERHUB_REPO/tags/$TAG/
@@ -125,7 +122,7 @@ pipeline {
 
     post {
         success {
-            echo "✅ Pipeline completed successfully"
+            echo "✅ Pipeline completed: only latest 3 builds kept locally and on Docker Hub"
         }
         failure {
             echo "❌ Pipeline failed"
