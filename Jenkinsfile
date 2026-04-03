@@ -3,23 +3,16 @@ pipeline {
 
     environment {
         IMAGE_NAME = "nithyan12/python-jenkins-app"
-        IMAGE_TAG  = "latest"
-        CREDS_ID   = "dockerhub-cred"
+        IMAGE_TAG  = "build-${BUILD_NUMBER}"
     }
 
     stages {
-
-        stage('Checkout Code') {
-            steps {
-                checkout scm
-                sh 'ls -l'
-            }
-        }
 
         stage('Build Docker Image') {
             steps {
                 sh '''
                 docker build -t $IMAGE_NAME:$IMAGE_TAG .
+                docker tag  $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
                 '''
             }
         }
@@ -27,7 +20,7 @@ pipeline {
         stage('Login to Docker Hub') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: CREDS_ID,
+                    credentialsId: 'dockerhub-cred',
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
@@ -42,37 +35,9 @@ pipeline {
             steps {
                 sh '''
                 docker push $IMAGE_NAME:$IMAGE_TAG
+                docker push $IMAGE_NAME:latest
                 '''
             }
-        }
-
-        stage('Verify Image Locally') {
-            steps {
-                sh '''
-                docker rmi $IMAGE_NAME:$IMAGE_TAG || true
-                docker pull $IMAGE_NAME:$IMAGE_TAG
-                '''
-            }
-        }
-
-        stage('Run Container') {
-            steps {
-                sh '''
-                docker stop python-app || true
-                docker rm python-app || true
-
-                docker run -d --name python-app $IMAGE_NAME:$IMAGE_TAG
-                '''
-            }
-        }
-    }
-
-    post {
-        success {
-            echo "✅ Image built, pushed, pulled, and container started successfully"
-        }
-        failure {
-            echo "❌ Pipeline failed"
         }
     }
 }
