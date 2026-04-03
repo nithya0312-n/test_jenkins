@@ -5,6 +5,7 @@ pipeline {
         IMAGE_NAME     = "nithyan12/python-jenkins-app"
         IMAGE_TAG      = "build-${BUILD_NUMBER}"
         CONTAINER_NAME = "python-app"
+        KEEP_IMAGES    = 3
     }
 
     stages {
@@ -12,7 +13,6 @@ pipeline {
         stage('Checkout Code') {
             steps {
                 checkout scm
-                sh 'ls -l'
             }
         }
 
@@ -61,14 +61,38 @@ pipeline {
                 '''
             }
         }
+
+        stage('Cleanup Old Docker Images (Keep Latest 3)') {
+            steps {
+                sh '''
+                echo "Cleaning up old Docker images (keeping latest ${KEEP_IMAGES})"
+
+                IMAGES=$(docker images $IMAGE_NAME --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" \
+                         | grep build- \
+                         | sort -rk2 \
+                         | awk '{print $1}')
+
+                COUNT=0
+                for IMAGE in $IMAGES; do
+                    COUNT=$((COUNT+1))
+                    if [ $COUNT -le $KEEP_IMAGES ]; then
+                        echo "Keeping $IMAGE"
+                    else
+                        echo "Removing $IMAGE"
+                        docker rmi -f $IMAGE || true
+                    fi
+                done
+                '''
+            }
+        }
     }
 
     post {
         success {
-            echo "✅ CI/CD Pipeline completed successfully"
+            echo "✅ Pipeline completed successfully (old images cleaned)"
         }
         failure {
-            echo "❌ CI/CD Pipeline failed"
+            echo "❌ Pipeline failed"
         }
     }
 }
