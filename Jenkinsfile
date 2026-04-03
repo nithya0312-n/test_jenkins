@@ -4,7 +4,7 @@ pipeline {
     environment {
         IMAGE_NAME = "nithyan12/python-jenkins-app"
         IMAGE_TAG  = "latest"
-        CREDS_ID   = "dockerhub-creds"
+        CREDS_ID   = "dockerhub-cred"
     }
 
     stages {
